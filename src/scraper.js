@@ -364,7 +364,9 @@ function extractCleanTextFromRoot(root) {
     "términos y condiciones",
     "politica de privacidad",
     "política de privacidad",
-    "todos los derechos reservados",`r`n    "the store will not work correctly when cookies are disabled",`r`n    "necesitamos el consentimiento para utilizar tus cookies",
+    "todos los derechos reservados",
+    "the store will not work correctly when cookies are disabled",
+    "necesitamos el consentimiento para utilizar tus cookies",
   ];
 
   target.querySelectorAll("*").forEach((node) => {

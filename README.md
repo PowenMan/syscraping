@@ -51,6 +51,38 @@ npm start
 
 Luego abre [http://localhost:3000](http://localhost:3000).
 
+## Modo producción local
+
+Para dejar la app corriendo en segundo plano en Windows:
+
+```bash
+npm run local:start
+```
+
+Para revisar estado:
+
+```bash
+npm run local:status
+```
+
+Para reiniciar:
+
+```bash
+npm run local:restart
+```
+
+Para detener:
+
+```bash
+npm run local:stop
+```
+
+Los archivos de runtime quedan en `storage/runtime`:
+
+- `syscraping.pid`
+- `syscraping.out.log`
+- `syscraping.err.log`
+
 ## Uso
 
 1. Ingresa la URL objetivo.
@@ -73,7 +105,7 @@ cd syscraping
 copy .env.example .env
 npm install
 npx playwright install
-npm start
+npm run local:start
 ```
 
 ## Subirlo a Git

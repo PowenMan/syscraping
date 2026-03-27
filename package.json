@@ -7,7 +7,11 @@
   "scripts": {
     "scrape": "node ./src/index.js",
     "scrape:config": "node ./src/index.js --config ./scraper.config.json",
-    "start": "node ./src/server.js"
+    "start": "node ./src/server.js",
+    "local:start": "powershell -ExecutionPolicy Bypass -File ./scripts/start-local.ps1",
+    "local:stop": "powershell -ExecutionPolicy Bypass -File ./scripts/stop-local.ps1",
+    "local:status": "powershell -ExecutionPolicy Bypass -File ./scripts/status-local.ps1",
+    "local:restart": "powershell -ExecutionPolicy Bypass -File ./scripts/restart-local.ps1"
   },
   "engines": {
     "node": ">=18"
