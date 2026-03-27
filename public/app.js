@@ -261,6 +261,18 @@ function renderSummary(data) {
     ? `<br><small>La corrida continuó desde una página pendiente guardada anteriormente.</small>`
     : "";
 
+  const resumedPage = data.stats?.resumedFromUrl
+    ? `<br><small>Retomó desde ${escapeHtml(formatPageLabel(data.stats.resumedFromUrl, data.startUrl || ""))}.</small>`
+    : "";
+
+  const lastVisitedPage = data.stats?.lastVisitedUrl
+    ? `<br><small>Última página revisada: ${escapeHtml(formatPageLabel(data.stats.lastVisitedUrl, data.startUrl || ""))}.</small>`
+    : "";
+
+  const nextPendingPage = data.stats?.nextPageUrl
+    ? `<br><small>Siguiente página pendiente: ${escapeHtml(formatPageLabel(data.stats.nextPageUrl, data.startUrl || ""))}.</small>`
+    : "";
+
   const nextStep = data.stats?.hasPendingPages
     ? `<br><small>Quedó guardada la siguiente página para continuar automáticamente en la próxima ejecución.</small>`
     : data.stats?.reachedEnd
@@ -268,7 +280,7 @@ function renderSummary(data) {
       : "";
 
   summary.innerHTML = `
-    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${nextStep}${warnings}
+    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${resumedPage}${lastVisitedPage}${nextPendingPage}${nextStep}${warnings}
   `;
 }
 
@@ -322,6 +334,28 @@ function formatDate(value) {
   } catch {
     return String(value || "");
   }
+}
+
+function formatPageLabel(value, fallbackStartUrl = "") {
+  if (!value) {
+    return "una página desconocida";
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    const page = Number(url.searchParams.get("p") || "1");
+
+    if (Number.isFinite(page) && page > 0) {
+      return `la página ${page}`;
+    }
+  } catch {
+  }
+
+  if (fallbackStartUrl && value === fallbackStartUrl) {
+    return "la página 1";
+  }
+
+  return value;
 }
 
 function escapeAttributeJson(value) {
