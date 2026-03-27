@@ -250,6 +250,7 @@ function clearResults() {
 
 function renderSummary(data) {
   const skippedPageWarnings = extractSkippedPageWarnings(data.warnings);
+  const progressLabel = buildProgressLabel(data.stats);
   const warnings = Array.isArray(data.warnings) && data.warnings.length
     ? `<br><small>${escapeHtml(data.warnings[0])}${data.warnings.length > 1 ? ` y ${data.warnings.length - 1} más.` : ""}</small>`
     : "";
@@ -285,6 +286,7 @@ function renderSummary(data) {
     : "";
 
   summary.innerHTML = `
+    ${progressLabel ? `<small><strong>${escapeHtml(progressLabel)}</strong></small><br>` : ""}
     <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${resumedPage}${lastVisitedPage}${nextPendingPage}${nextStep}${skippedFailedPages}${warnings}
   `;
 }
@@ -369,6 +371,39 @@ function extractSkippedPageWarnings(warnings) {
   }
 
   return warnings.filter((warning) => String(warning).toLowerCase().includes("se omitio la pagina fallida"));
+}
+
+function buildProgressLabel(stats) {
+  const lastVisitedPage = extractPageNumber(stats?.lastVisitedUrl);
+  const nextPendingPage = extractPageNumber(stats?.nextPageUrl);
+
+  if (lastVisitedPage && nextPendingPage) {
+    return `Progreso acumulado del listado: se llegó hasta la página ${lastVisitedPage} y la siguiente pendiente es la ${nextPendingPage}.`;
+  }
+
+  if (lastVisitedPage) {
+    return `Progreso acumulado del listado: se llegó hasta la página ${lastVisitedPage}.`;
+  }
+
+  if (nextPendingPage) {
+    return `Progreso acumulado del listado: la siguiente página pendiente es la ${nextPendingPage}.`;
+  }
+
+  return "";
+}
+
+function extractPageNumber(value) {
+  if (!value) {
+    return 0;
+  }
+
+  try {
+    const url = new URL(value, window.location.origin);
+    const page = Number(url.searchParams.get("p") || "1");
+    return Number.isFinite(page) && page > 0 ? page : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function escapeAttributeJson(value) {
