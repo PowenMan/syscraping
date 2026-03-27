@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --test tests/)",
+      "Bash(node --test ./tests/scraper.test.js)"
+    ]
+  }
+}

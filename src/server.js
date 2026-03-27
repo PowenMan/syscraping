@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import "../env.js";
 import { clearAllHistory, deleteRun, ensureDatabaseSchema, getRecentRuns, getRunResults } from "./db.js";
+import { logger } from "./logger.js";
 import { loadJsonConfig, resolveOutputUrls, runScraper } from "./scraper.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -109,7 +110,7 @@ const server = http.createServer(async (request, response) => {
 await ensureDatabaseSchema();
 
 server.listen(port, () => {
-  console.log(`Syscraping disponible en http://localhost:${port}`);
+  logger.info(`Syscraping disponible en http://localhost:${port}`);
 });
 
 async function buildConfig(body) {
@@ -122,7 +123,7 @@ async function buildConfig(body) {
   const urlSelector = String(body?.urlSelector || DEFAULTS.urlSelector).trim();
   const nextButtonSelector = String(body?.nextButtonSelector || DEFAULTS.nextButtonSelector).trim();
   const requestedMaxPages = Number(body?.maxPages || DEFAULTS.maxPages);
-  const maxPages = Number.isFinite(requestedMaxPages) ? Math.min(Math.max(requestedMaxPages, 1), 29) : DEFAULTS.maxPages;
+  const maxPages = Number.isFinite(requestedMaxPages) && requestedMaxPages >= 1 ? Math.floor(requestedMaxPages) : DEFAULTS.maxPages;
 
   if (!url) {
     throw new Error("Debes indicar una URL valida.");

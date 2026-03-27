@@ -161,6 +161,41 @@ function validateConfig(config) {
   if (!config.extract?.fields || Object.keys(config.extract.fields).length === 0) {
     throw new Error('La configuracion debe incluir campos en "extract.fields".');
   }
+
+  const selectorsToValidate = [
+    ["extract.itemSelector", config.extract.itemSelector],
+    ...Object.entries(config.extract.fields)
+      .filter(([, f]) => f.selector)
+      .map(([name, f]) => [`extract.fields.${name}.selector`, f.selector]),
+  ];
+
+  if (config.crawl?.pagination?.nextButtonSelector) {
+    selectorsToValidate.push(["crawl.pagination.nextButtonSelector", config.crawl.pagination.nextButtonSelector]);
+  }
+
+  if (config.crawl?.waitForSelector) {
+    selectorsToValidate.push(["crawl.waitForSelector", config.crawl.waitForSelector]);
+  }
+
+  for (const [path, selector] of selectorsToValidate) {
+    validateCssSelector(path, selector);
+  }
+}
+
+function validateCssSelector(configPath, selector) {
+  if (typeof selector !== "string" || !selector.trim()) {
+    throw new Error(`El selector CSS en "${configPath}" esta vacio o no es valido.`);
+  }
+
+  try {
+    // Use a minimal document fragment to validate the selector syntax
+    // This will throw if the selector is syntactically invalid
+    if (typeof globalThis.document !== "undefined") {
+      globalThis.document.querySelector(selector);
+    }
+  } catch {
+    throw new Error(`El selector CSS "${selector}" en "${configPath}" no es valido.`);
+  }
 }
 
 function createSearchKey(startUrl, keywords) {
@@ -171,21 +206,32 @@ function createSearchKey(startUrl, keywords) {
 
 async function openListingPage(page, url, config) {
   const waitSelector = config.crawl?.waitForSelector;
-  const attempts = 2;
+  const maxRetries = config.browser?.retries ?? 3;
+
+  await retryWithBackoff(async () => {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+
+    if (waitSelector) {
+      await page.waitForSelector(waitSelector, { state: "attached", timeout: 15000 });
+    }
+
+    await autoScroll(page, config.crawl?.scroll);
+  }, maxRetries);
+}
+
+async function retryWithBackoff(fn, maxRetries, baseDelayMs = 1000) {
   let lastError;
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
     try {
-      await page.goto(url, { waitUntil: "domcontentloaded" });
-
-      if (waitSelector) {
-        await page.waitForSelector(waitSelector, { state: "attached", timeout: 15000 });
-      }
-
-      await autoScroll(page, config.crawl?.scroll);
-      return;
+      return await fn();
     } catch (error) {
       lastError = error;
+
+      if (attempt < maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt);
+        await sleep(delay);
+      }
     }
   }
 
@@ -259,32 +305,56 @@ async function extractItems(page, config) {
 
 async function enrichItemsWithDetailContent(context, items, config, warnings) {
   const detailSelector = config.extract?.detailContent?.selector || "main";
-  const detailPage = await context.newPage();
-  detailPage.setDefaultTimeout(config.browser?.timeoutMs ?? 30000);
+  const delayMs = config.extract?.detailContent?.delayMs ?? 500;
+  const detailTimeoutMs = config.extract?.detailContent?.timeoutMs ?? 15000;
+  const concurrency = config.extract?.detailContent?.concurrency ?? 1;
+
+  const pages = [];
+  for (let p = 0; p < concurrency; p += 1) {
+    const detailPage = await context.newPage();
+    detailPage.setDefaultTimeout(detailTimeoutMs);
+    pages.push(detailPage);
+  }
 
   try {
-    const enriched = [];
+    const enriched = new Array(items.length);
+    const itemsWithUrl = [];
 
-    for (const item of items) {
-      if (!item.url) {
-        enriched.push(item);
-        continue;
+    for (let i = 0; i < items.length; i += 1) {
+      if (!items[i].url) {
+        enriched[i] = items[i];
+      } else {
+        itemsWithUrl.push(i);
+      }
+    }
+
+    for (let batchStart = 0; batchStart < itemsWithUrl.length; batchStart += concurrency) {
+      if (batchStart > 0 && delayMs > 0) {
+        await sleep(delayMs);
       }
 
-      try {
-        await detailPage.goto(item.url, { waitUntil: "domcontentloaded" });
-        const content = await extractDetailContent(detailPage, detailSelector);
+      const batch = itemsWithUrl.slice(batchStart, batchStart + concurrency);
 
-        enriched.push({ ...item, content: normalizeContent(content) });
-      } catch (error) {
-        warnings.push(`No se pudo leer el detalle de ${item.url}: ${toMessage(error)}`);
-        enriched.push(item);
-      }
+      await Promise.all(
+        batch.map(async (itemIndex, pageIndex) => {
+          const item = items[itemIndex];
+          const detailPage = pages[pageIndex];
+
+          try {
+            await detailPage.goto(item.url, { waitUntil: "domcontentloaded" });
+            const content = await extractDetailContent(detailPage, detailSelector);
+            enriched[itemIndex] = { ...item, content: normalizeContent(content) };
+          } catch (error) {
+            warnings.push(`No se pudo leer el detalle de ${item.url}: ${toMessage(error)}`);
+            enriched[itemIndex] = item;
+          }
+        })
+      );
     }
 
     return enriched;
   } finally {
-    await detailPage.close();
+    await Promise.all(pages.map((p) => p.close()));
   }
 }
 
@@ -508,7 +578,7 @@ async function writeOutput(items, outputConfig = {}) {
 
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(jsonPath, `${JSON.stringify(items, null, 2)}\n`, "utf8");
-  await fs.writeFile(csvPath, `${toCsv(items)}\n`, "utf8");
+  await fs.writeFile(csvPath, toCsv(items), "utf8");
 
   const workbook = XLSX.utils.book_new();
   const worksheet = XLSX.utils.json_to_sheet(toWorkbookRows(items));
@@ -527,7 +597,8 @@ function toCsv(items) {
 
   const escapeCell = (value) => {
     const normalized = Array.isArray(value) ? value.join(" | ") : String(value ?? "");
-    const escaped = normalized.replace(/"/g, '""');
+    const sanitized = normalized.replace(/\r\n?/g, "\n");
+    const escaped = sanitized.replace(/"/g, '""');
     return `"${escaped}"`;
   };
 
@@ -536,7 +607,7 @@ function toCsv(items) {
     ...items.map((item) => headers.map((header) => escapeCell(item[header])).join(",")),
   ];
 
-  return lines.join("\n");
+  return "\uFEFF" + lines.join("\r\n");
 }
 
 function toWorkbookRows(items) {
@@ -545,6 +616,12 @@ function toWorkbookRows(items) {
   ));
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function toMessage(error) {
   return error instanceof Error ? error.message.split("\n")[0] : String(error);
 }
+
+export const _testUtils = { filterByKeywords, dedupe, toCsv, normalizeSearchValue };

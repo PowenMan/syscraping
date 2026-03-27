@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import "../env.js";
+import { logger } from "./logger.js";
 import { loadJsonConfig, runScraper } from "./scraper.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -13,13 +14,13 @@ const configPath = getConfigPath();
 const config = await loadJsonConfig(configPath, configPath === defaultConfigPath ? fallbackConfigPath : undefined);
 const result = await runScraper(config);
 
-console.log(`Paginas visitadas: ${result.stats.pagesVisited}`);
-console.log(`Items extraidos: ${result.stats.extractedItems}`);
-console.log(`Items filtrados: ${result.stats.filteredItems}`);
-console.log(`Items unicos: ${result.stats.uniqueItems}`);
-console.log(`JSON: ${result.files.jsonPath}`);
-console.log(`CSV: ${result.files.csvPath}`);
-console.log(`Excel: ${result.files.xlsxPath}`);
+logger.info(`Paginas visitadas: ${result.stats.pagesVisited}`);
+logger.info(`Items extraidos: ${result.stats.extractedItems}`);
+logger.info(`Items filtrados: ${result.stats.filteredItems}`);
+logger.info(`Items unicos: ${result.stats.uniqueItems}`);
+logger.info(`JSON: ${result.files.jsonPath}`);
+logger.info(`CSV: ${result.files.csvPath}`);
+logger.info(`Excel: ${result.files.xlsxPath}`);
 
 function getConfigPath() {
   const argIndex = process.argv.indexOf("--config");

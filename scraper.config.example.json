@@ -21,6 +21,13 @@
   },
   "extract": {
     "itemSelector": ".post-item-details",
+    "detailContent": {
+      "enabled": false,
+      "selector": "main",
+      "delayMs": 500,
+      "timeoutMs": 15000,
+      "concurrency": 1
+    },
     "fields": {
       "title": {
         "selector": ".post-item-name span",
