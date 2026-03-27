@@ -1,0 +1,7 @@
+node_modules/
+outputs/
+playwright-report/
+test-results/
+scraper.config.json
+.env
+storage/

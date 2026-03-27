@@ -1,0 +1,44 @@
+{
+  "startUrl": "https://clubmamasypapas.com/contenidos",
+  "keywords": [
+    "Mi manual del bebe"
+  ],
+  "browser": {
+    "headless": true,
+    "timeoutMs": 30000
+  },
+  "crawl": {
+    "maxPages": 10,
+    "waitForSelector": ".post-item-details",
+    "scroll": {
+      "enabled": false,
+      "times": 3,
+      "delayMs": 1000
+    },
+    "pagination": {
+      "nextButtonSelector": ".pages-item-next a.next"
+    }
+  },
+  "extract": {
+    "itemSelector": ".post-item-details",
+    "fields": {
+      "title": {
+        "selector": ".post-item-name span",
+        "type": "text"
+      },
+      "summary": {
+        "selector": ".blog-item-description span",
+        "type": "text"
+      },
+      "url": {
+        "selector": ".post-item-link a",
+        "type": "attribute",
+        "attribute": "href"
+      }
+    }
+  },
+  "output": {
+    "directory": "./outputs",
+    "basename": "scrape-results"
+  }
+}

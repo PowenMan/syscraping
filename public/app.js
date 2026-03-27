@@ -1,0 +1,329 @@
+const form = document.getElementById("scrape-form");
+const status = document.getElementById("status");
+const submitButton = document.getElementById("submit-button");
+const summary = document.getElementById("summary");
+const resultsList = document.getElementById("results-list");
+const downloads = document.getElementById("downloads");
+const historyList = document.getElementById("history-list");
+const clearHistoryButton = document.getElementById("clear-history-button");
+
+await hydrateDefaults();
+await loadHistory();
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  const formData = new FormData(form);
+  const payload = {
+    url: formData.get("url")?.toString().trim(),
+    keyword: formData.get("keyword")?.toString().trim(),
+    maxPages: Number(formData.get("maxPages") || 10),
+    itemSelector: formData.get("itemSelector")?.toString().trim(),
+    titleSelector: formData.get("titleSelector")?.toString().trim(),
+    summarySelector: formData.get("summarySelector")?.toString().trim(),
+    urlSelector: formData.get("urlSelector")?.toString().trim(),
+    nextButtonSelector: formData.get("nextButtonSelector")?.toString().trim(),
+    skipKnownMatches: document.getElementById("skipKnownMatches").checked,
+    resetKnownMatches: document.getElementById("resetKnownMatches").checked,
+  };
+
+  setLoading(true);
+  setStatus("Ejecutando scraping y revisando el contenido de los artículos...");
+  clearResults();
+
+  try {
+    const response = await fetch("/api/scrape", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo completar el scraping.");
+    }
+
+    const warningsCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+    setStatus(warningsCount ? `Scraping completado con ${warningsCount} advertencia(s).` : "Scraping completado.");
+    renderSummary(data);
+    renderDownloads(data.files);
+    renderResults(data.items);
+    document.getElementById("resetKnownMatches").checked = false;
+    await loadHistory();
+  } catch (error) {
+    setStatus(error.message || "Se produjo un error ejecutando el scraping.");
+  } finally {
+    setLoading(false);
+  }
+});
+
+historyList.addEventListener("click", async (event) => {
+  const useButton = event.target.closest("[data-action='use-run']");
+  if (useButton) {
+    applyRunToForm(JSON.parse(useButton.dataset.payload));
+    return;
+  }
+
+  const viewButton = event.target.closest("[data-action='view-run']");
+  if (viewButton) {
+    await loadHistoryRunResults(Number(viewButton.dataset.runId));
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-action='delete-run']");
+  if (deleteButton) {
+    await deleteRun(Number(deleteButton.dataset.runId));
+  }
+});
+
+clearHistoryButton.addEventListener("click", async () => {
+  if (!window.confirm("Esto eliminará todas las corridas, resultados guardados y cache de coincidencias. ¿Deseas continuar?")) {
+    return;
+  }
+
+  setStatus("Borrando historial completo...");
+
+  try {
+    const response = await fetch("/api/history/clear", { method: "POST" });
+    const data = await response.json();
+
+    if (!response.ok || !data.cleared) {
+      throw new Error(data.error || "No se pudo borrar el historial.");
+    }
+
+    clearResults();
+    await loadHistory();
+    setStatus("Historial completo borrado.");
+  } catch (error) {
+    setStatus(error.message || "No se pudo borrar el historial.");
+  }
+});
+
+async function hydrateDefaults() {
+  try {
+    const response = await fetch("/api/defaults");
+    const defaults = await response.json();
+
+    if (!response.ok) {
+      return;
+    }
+
+    for (const [key, value] of Object.entries(defaults)) {
+      const field = document.getElementById(key);
+      if (!field) {
+        continue;
+      }
+
+      if (field.type === "checkbox") {
+        field.checked = Boolean(value);
+      } else {
+        field.value = value;
+      }
+    }
+  } catch {
+  }
+}
+
+async function loadHistory() {
+  historyList.innerHTML = `<div class="empty compact">Cargando historial...</div>`;
+
+  try {
+    const response = await fetch("/api/history");
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo cargar el historial.");
+    }
+
+    renderHistory(data.runs || []);
+  } catch (error) {
+    historyList.innerHTML = `<div class="empty compact">${escapeHtml(error.message || "No se pudo cargar el historial.")}</div>`;
+  }
+}
+
+async function loadHistoryRunResults(runId) {
+  setStatus("Cargando resultados guardados de esa corrida...");
+  clearResults();
+
+  try {
+    const response = await fetch(`/api/history/${runId}`);
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudieron cargar los resultados guardados.");
+    }
+
+    summary.innerHTML = `<strong>${data.items.length}</strong> resultado(s) recuperados del historial.`;
+    renderResults(data.items || []);
+    downloads.innerHTML = "";
+    setStatus("Resultados cargados desde el historial.");
+  } catch (error) {
+    setStatus(error.message || "No se pudieron cargar los resultados del historial.");
+  }
+}
+
+async function deleteRun(runId) {
+  if (!window.confirm("¿Deseas eliminar esta corrida del historial?")) {
+    return;
+  }
+
+  setStatus("Eliminando corrida...");
+
+  try {
+    const response = await fetch(`/api/history/${runId}`, { method: "DELETE" });
+    const data = await response.json();
+
+    if (!response.ok || !data.deleted) {
+      throw new Error(data.error || "No se pudo eliminar la corrida.");
+    }
+
+    await loadHistory();
+    setStatus("Corrida eliminada del historial.");
+  } catch (error) {
+    setStatus(error.message || "No se pudo eliminar la corrida.");
+  }
+}
+
+function renderHistory(runs) {
+  if (!runs.length) {
+    historyList.innerHTML = `<div class="empty compact">Todavía no hay búsquedas registradas.</div>`;
+    return;
+  }
+
+  historyList.innerHTML = runs
+    .map((run) => {
+      const payload = escapeAttributeJson({
+        url: run.startUrl,
+        keyword: run.keyword,
+        maxPages: run.maxPages,
+      });
+
+      return `
+        <article class="history-card">
+          <div class="history-top">
+            <strong>${escapeHtml(run.keyword || "Sin palabra clave")}</strong>
+            <span>${formatDate(run.createdAt)}</span>
+          </div>
+          <p>${escapeHtml(run.startUrl)}</p>
+          <div class="history-stats">
+            <span>${run.uniqueItems} nuevos</span>
+            <span>${run.skippedKnownUrls} omitidos</span>
+            <span>${run.pagesVisited} páginas</span>
+          </div>
+          <div class="history-actions">
+            <button type="button" class="secondary-button" data-action="view-run" data-run-id="${run.id}">Ver</button>
+            <button type="button" class="secondary-button" data-action="use-run" data-payload="${payload}">Reusar</button>
+            <button type="button" class="secondary-button danger-button" data-action="delete-run" data-run-id="${run.id}">Eliminar</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function applyRunToForm(run) {
+  document.getElementById("url").value = run.url || "";
+  document.getElementById("keyword").value = run.keyword || "";
+  if (run.maxPages) {
+    document.getElementById("maxPages").value = run.maxPages;
+  }
+  setStatus("Se cargaron los filtros de una búsqueda anterior.");
+}
+
+function setLoading(isLoading) {
+  submitButton.disabled = isLoading;
+  submitButton.textContent = isLoading ? "Buscando..." : "Ejecutar scraping";
+}
+
+function setStatus(message) {
+  status.textContent = message;
+}
+
+function clearResults() {
+  summary.innerHTML = "";
+  downloads.innerHTML = "";
+  resultsList.innerHTML = "";
+}
+
+function renderSummary(data) {
+  const warnings = Array.isArray(data.warnings) && data.warnings.length
+    ? `<br><small>${escapeHtml(data.warnings[0])}${data.warnings.length > 1 ? ` y ${data.warnings.length - 1} más.` : ""}</small>`
+    : "";
+
+  const skipped = Number(data.stats?.skippedKnownUrls || 0)
+    ? `<br><small>Se omitieron ${data.stats.skippedKnownUrls} URL(s) ya encontradas para esta misma búsqueda.</small>`
+    : "";
+
+  summary.innerHTML = `
+    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${warnings}
+  `;
+}
+
+function renderDownloads(files) {
+  if (!files?.jsonUrl && !files?.csvUrl) {
+    return;
+  }
+
+  downloads.innerHTML = `
+    ${files.jsonUrl ? `<a href="${files.jsonUrl}" target="_blank" rel="noreferrer">JSON</a>` : ""}
+    ${files.csvUrl ? `<a href="${files.csvUrl}" target="_blank" rel="noreferrer">CSV</a>` : ""}
+    ${files.xlsxUrl ? `<a href="${files.xlsxUrl}" target="_blank" rel="noreferrer">Excel</a>` : ""}
+  `;
+}
+
+function renderResults(items) {
+  if (!items?.length) {
+    resultsList.innerHTML = `<div class="empty">No se encontraron coincidencias nuevas para esa palabra clave.</div>`;
+    return;
+  }
+
+  resultsList.innerHTML = items
+    .map((item) => {
+      const title = escapeHtml(item.title || "Sin título");
+      const summaryText = escapeHtml(item.summary || "Sin resumen");
+      const url = item.url ? escapeHtml(item.url) : "";
+      const keywordChips = (item.matchedKeywords || [])
+        .map((keyword) => `<span class="chip">${escapeHtml(keyword)}</span>`)
+        .join("");
+
+      return `
+        <article class="result-card">
+          <div class="result-head">
+            <h3>${title}</h3>
+            <div class="chips">${keywordChips}</div>
+          </div>
+          <p>${summaryText}</p>
+          ${url ? `<a class="result-link" href="${url}" target="_blank" rel="noreferrer">Abrir artículo</a>` : ""}
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function formatDate(value) {
+  try {
+    return new Date(value).toLocaleString("es-CO", {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+  } catch {
+    return String(value || "");
+  }
+}
+
+function escapeAttributeJson(value) {
+  return escapeHtml(JSON.stringify(value));
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+

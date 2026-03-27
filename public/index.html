@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Syscraping</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="hero card card-hero">
+        <div>
+          <p class="eyebrow">Syscraping</p>
+          <h1>Buscador y seguimiento de scraping</h1>
+          <p class="lead">
+            Ejecuta búsquedas, evita repetir resultados ya encontrados y consulta el historial de corridas guardado en MySQL.
+          </p>
+        </div>
+        <div class="hero-stats">
+          <div class="mini-stat">
+            <strong>MySQL</strong>
+            <span>Base `syscraping` activa</span>
+          </div>
+          <div class="mini-stat">
+            <strong>Historial</strong>
+            <span>Corridas recientes reutilizables</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <section class="card panel">
+          <div class="section-head">
+            <h2>Nueva búsqueda</h2>
+            <p>Configura la URL, la palabra clave y cómo detectar los contenidos.</p>
+          </div>
+
+          <form id="scrape-form" class="form">
+            <label>
+              <span>URL objetivo</span>
+              <input id="url" name="url" type="url" value="https://clubmamasypapas.com/contenidos" required />
+            </label>
+
+            <label>
+              <span>Palabra clave</span>
+              <input id="keyword" name="keyword" type="text" value="Mi manual del bebe" required />
+            </label>
+
+            <label>
+              <span>Páginas a revisar</span>
+              <input id="maxPages" name="maxPages" type="number" min="1" max="29" value="10" required />
+            </label>
+
+            <label>
+              <span>Selector de cada item</span>
+              <input id="itemSelector" name="itemSelector" type="text" value=".post-item-details" required />
+            </label>
+
+            <label>
+              <span>Selector del título</span>
+              <input id="titleSelector" name="titleSelector" type="text" value=".post-item-name span" required />
+            </label>
+
+            <label>
+              <span>Selector del resumen</span>
+              <input id="summarySelector" name="summarySelector" type="text" value=".blog-item-description span" />
+            </label>
+
+            <label>
+              <span>Selector del enlace</span>
+              <input id="urlSelector" name="urlSelector" type="text" value=".post-item-link a" required />
+            </label>
+
+            <label>
+              <span>Selector página siguiente</span>
+              <input id="nextButtonSelector" name="nextButtonSelector" type="text" value=".pages-item-next a.next" required />
+            </label>
+
+            <div class="toggle-group">
+              <label class="check-row">
+                <input id="skipKnownMatches" name="skipKnownMatches" type="checkbox" checked />
+                <span>Omitir resultados ya encontrados</span>
+              </label>
+
+              <label class="check-row">
+                <input id="resetKnownMatches" name="resetKnownMatches" type="checkbox" />
+                <span>Limpiar historial antes de ejecutar</span>
+              </label>
+            </div>
+
+            <button id="submit-button" type="submit">Ejecutar scraping</button>
+          </form>
+
+          <div id="status" class="status" aria-live="polite"></div>
+        </section>
+
+        <aside class="card history-panel">
+          <div class="history-head">
+            <div class="section-head">
+              <h2>Historial</h2>
+              <p>Últimas búsquedas guardadas en la base de datos.</p>
+            </div>
+            <button id="clear-history-button" type="button" class="secondary-button danger-button">Borrar todo</button>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </aside>
+      </section>
+
+      <section class="card results">
+        <div class="results-header">
+          <div>
+            <h2>Resultados</h2>
+            <div id="summary" class="summary"></div>
+          </div>
+          <div id="downloads" class="downloads"></div>
+        </div>
+        <div id="results-list" class="results-list"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
