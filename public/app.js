@@ -285,8 +285,11 @@ function renderSummary(data) {
     ? `<br><small>Se saltó ${skippedPageWarnings.length} página(s) fallida(s) y la corrida siguió avanzando.</small><br><small>${escapeHtml(skippedPageWarnings[0])}</small>`
     : "";
 
+  const progressMarkup = buildProgressMarkup(data.stats);
+
   summary.innerHTML = `
     ${progressLabel ? `<small><strong>${escapeHtml(progressLabel)}</strong></small><br>` : ""}
+    ${progressMarkup}
     <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${resumedPage}${lastVisitedPage}${nextPendingPage}${nextStep}${skippedFailedPages}${warnings}
   `;
 }
@@ -404,6 +407,26 @@ function extractPageNumber(value) {
   } catch {
     return 0;
   }
+}
+
+function buildProgressMarkup(stats) {
+  const currentPage = extractPageNumber(stats?.lastVisitedUrl) || extractPageNumber(stats?.nextPageUrl);
+  const totalPages = Number(document.getElementById("maxPages")?.max || 29);
+
+  if (!currentPage || !Number.isFinite(totalPages) || totalPages <= 0) {
+    return "";
+  }
+
+  const percentage = Math.max(0, Math.min((currentPage / totalPages) * 100, 100));
+
+  return `
+    <div class="summary-progress" aria-label="Progreso del listado">
+      <div class="summary-progress-track">
+        <div class="summary-progress-fill" style="width: ${percentage.toFixed(1)}%"></div>
+      </div>
+      <div class="summary-progress-meta">Página ${currentPage} de ${totalPages} configuradas</div>
+    </div>
+  `;
 }
 
 function escapeAttributeJson(value) {
