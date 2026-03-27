@@ -249,6 +249,7 @@ function clearResults() {
 }
 
 function renderSummary(data) {
+  const skippedPageWarnings = extractSkippedPageWarnings(data.warnings);
   const warnings = Array.isArray(data.warnings) && data.warnings.length
     ? `<br><small>${escapeHtml(data.warnings[0])}${data.warnings.length > 1 ? ` y ${data.warnings.length - 1} más.` : ""}</small>`
     : "";
@@ -279,8 +280,12 @@ function renderSummary(data) {
       ? `<br><small>Se alcanzó el final del listado disponible para esta búsqueda.</small>`
       : "";
 
+  const skippedFailedPages = skippedPageWarnings.length
+    ? `<br><small>Se saltó ${skippedPageWarnings.length} página(s) fallida(s) y la corrida siguió avanzando.</small><br><small>${escapeHtml(skippedPageWarnings[0])}</small>`
+    : "";
+
   summary.innerHTML = `
-    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${resumedPage}${lastVisitedPage}${nextPendingPage}${nextStep}${warnings}
+    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${resumedPage}${lastVisitedPage}${nextPendingPage}${nextStep}${skippedFailedPages}${warnings}
   `;
 }
 
@@ -356,6 +361,14 @@ function formatPageLabel(value, fallbackStartUrl = "") {
   }
 
   return value;
+}
+
+function extractSkippedPageWarnings(warnings) {
+  if (!Array.isArray(warnings)) {
+    return [];
+  }
+
+  return warnings.filter((warning) => String(warning).toLowerCase().includes("se omitio la pagina fallida"));
 }
 
 function escapeAttributeJson(value) {
