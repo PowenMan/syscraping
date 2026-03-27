@@ -80,7 +80,7 @@ historyList.addEventListener("click", async (event) => {
 });
 
 clearHistoryButton.addEventListener("click", async () => {
-  if (!window.confirm("Esto eliminará todas las corridas, resultados guardados y cache de coincidencias. ¿Deseas continuar?")) {
+  if (!window.confirm("Esto eliminará todas las corridas, resultados guardados, cache de coincidencias y el progreso de continuación. ¿Deseas continuar?")) {
     return;
   }
 
@@ -230,7 +230,7 @@ function applyRunToForm(run) {
   if (run.maxPages) {
     document.getElementById("maxPages").value = run.maxPages;
   }
-  setStatus("Se cargaron los filtros de una búsqueda anterior.");
+  setStatus("Se cargaron los filtros de una búsqueda anterior. Si ejecutas de nuevo, la búsqueda continuará desde la siguiente página pendiente de esa combinación URL + palabra clave.");
 }
 
 function setLoading(isLoading) {
@@ -257,13 +257,23 @@ function renderSummary(data) {
     ? `<br><small>Se omitieron ${data.stats.skippedKnownUrls} URL(s) ya encontradas para esta misma búsqueda.</small>`
     : "";
 
+  const resumed = data.stats?.startedFromSavedProgress
+    ? `<br><small>La corrida continuó desde una página pendiente guardada anteriormente.</small>`
+    : "";
+
+  const nextStep = data.stats?.hasPendingPages
+    ? `<br><small>Quedó guardada la siguiente página para continuar automáticamente en la próxima ejecución.</small>`
+    : data.stats?.reachedEnd
+      ? `<br><small>Se alcanzó el final del listado disponible para esta búsqueda.</small>`
+      : "";
+
   summary.innerHTML = `
-    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${warnings}
+    <strong>${data.stats.uniqueItems}</strong> coincidencias nuevas, ${data.stats.pagesVisited} página(s) revisadas y ${data.stats.extractedItems} item(s) extraídos.${skipped}${resumed}${nextStep}${warnings}
   `;
 }
 
 function renderDownloads(files) {
-  if (!files?.jsonUrl && !files?.csvUrl) {
+  if (!files?.jsonUrl && !files?.csvUrl && !files?.xlsxUrl) {
     return;
   }
 
@@ -326,4 +336,3 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }
-

@@ -2,7 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright";
 import XLSX from "xlsx";
-import { loadKnownMatches, persistKnownMatches, persistRun } from "./db.js";
+import {
+  loadKnownMatches,
+  loadSearchProgress,
+  persistKnownMatches,
+  persistRun,
+  persistSearchProgress,
+} from "./db.js";
 
 export async function runScraper(config) {
   validateConfig(config);
@@ -21,17 +27,22 @@ export async function runScraper(config) {
   const warnings = [];
   const searchKey = createSearchKey(config.startUrl, config.keywords ?? []);
   const processedState = await loadKnownMatches(searchKey, config.state);
+  const progressState = await loadSearchProgress(searchKey, config.startUrl, config.state);
   const skippedKnownUrls = new Set();
 
   page.setDefaultTimeout(timeoutMs);
 
   const extractedItems = [];
-  let currentUrl = config.startUrl;
+  let currentUrl = progressState.resumeFromUrl || config.startUrl;
+  let lastVisitedUrl = "";
   let pagesVisited = 0;
   const maxPages = config.crawl?.maxPages ?? 1;
+  const startedFromSavedProgress = progressState.hasStoredProgress && currentUrl !== config.startUrl;
 
   try {
     while (currentUrl && pagesVisited < maxPages) {
+      lastVisitedUrl = currentUrl;
+
       try {
         await openListingPage(page, currentUrl, config);
       } catch (error) {
@@ -71,6 +82,8 @@ export async function runScraper(config) {
   const filteredItems = filterByKeywords(extractedItems, config.keywords ?? []);
   const uniqueItems = dedupe(filteredItems);
   const files = await writeOutput(uniqueItems, config.output);
+  const hasPendingPages = Boolean(currentUrl);
+  const reachedEnd = !hasPendingPages && pagesVisited > 0;
   const result = {
     items: uniqueItems,
     files,
@@ -81,10 +94,22 @@ export async function runScraper(config) {
       filteredItems: filteredItems.length,
       uniqueItems: uniqueItems.length,
       skippedKnownUrls: skippedKnownUrls.size,
+      startedFromSavedProgress,
+      resumedFromUrl: startedFromSavedProgress ? progressState.resumeFromUrl : "",
+      nextPageUrl: currentUrl || "",
+      hasPendingPages,
+      reachedEnd,
+      lastVisitedUrl,
     },
   };
 
   await persistKnownMatches(searchKey, processedState.searchHash, uniqueItems);
+  await persistSearchProgress(searchKey, processedState.searchHash, {
+    startUrl: config.startUrl,
+    nextPageUrl: currentUrl,
+    lastPageUrl: lastVisitedUrl,
+    isComplete: !currentUrl,
+  });
   await persistRun(searchKey, processedState.searchHash, config, result);
 
   return result;

@@ -81,6 +81,22 @@ export async function ensureDatabaseSchema() {
       KEY idx_scrape_run_results_run_id (run_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS scrape_search_progress (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      search_key VARCHAR(1024) NOT NULL,
+      search_hash CHAR(64) NOT NULL,
+      start_url VARCHAR(1500) NOT NULL,
+      next_page_url VARCHAR(1500) NULL,
+      last_page_url VARCHAR(1500) NULL,
+      is_complete TINYINT(1) NOT NULL DEFAULT 0,
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uq_scrape_search_progress_search_hash (search_hash),
+      KEY idx_scrape_search_progress_updated_at (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
 }
 
 export async function loadKnownMatches(searchKey, { resetOnRun = false } = {}) {
@@ -101,6 +117,88 @@ export async function loadKnownMatches(searchKey, { resetOnRun = false } = {}) {
     searchHash,
     urls: new Set(rows.map((row) => row.result_url).filter(Boolean)),
   };
+}
+
+export async function loadSearchProgress(searchKey, startUrl, { resetOnRun = false, continueFromLastPage = true } = {}) {
+  const db = getDbPool();
+  const searchHash = hashValue(searchKey);
+
+  if (resetOnRun) {
+    await db.execute("DELETE FROM scrape_search_progress WHERE search_hash = ?", [searchHash]);
+    return {
+      searchHash,
+      resumeFromUrl: startUrl,
+      hasStoredProgress: false,
+      isComplete: false,
+      lastPageUrl: "",
+      nextPageUrl: "",
+    };
+  }
+
+  const [rows] = await db.execute(
+    `
+      SELECT start_url, next_page_url, last_page_url, is_complete
+      FROM scrape_search_progress
+      WHERE search_hash = ?
+      LIMIT 1
+    `,
+    [searchHash]
+  );
+
+  const row = rows[0];
+
+  if (!row) {
+    return {
+      searchHash,
+      resumeFromUrl: startUrl,
+      hasStoredProgress: false,
+      isComplete: false,
+      lastPageUrl: "",
+      nextPageUrl: "",
+    };
+  }
+
+  const shouldResume = continueFromLastPage !== false && row.next_page_url && !row.is_complete;
+
+  return {
+    searchHash,
+    resumeFromUrl: shouldResume ? row.next_page_url : startUrl,
+    hasStoredProgress: true,
+    isComplete: Boolean(row.is_complete),
+    lastPageUrl: row.last_page_url || "",
+    nextPageUrl: row.next_page_url || "",
+  };
+}
+
+export async function persistSearchProgress(searchKey, searchHash, payload) {
+  const db = getDbPool();
+
+  await db.execute(
+    `
+      INSERT INTO scrape_search_progress (
+        search_key,
+        search_hash,
+        start_url,
+        next_page_url,
+        last_page_url,
+        is_complete
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        start_url = VALUES(start_url),
+        next_page_url = VALUES(next_page_url),
+        last_page_url = VALUES(last_page_url),
+        is_complete = VALUES(is_complete),
+        updated_at = CURRENT_TIMESTAMP
+    `,
+    [
+      searchKey,
+      searchHash,
+      payload.startUrl,
+      payload.nextPageUrl || null,
+      payload.lastPageUrl || null,
+      payload.isComplete ? 1 : 0,
+    ]
+  );
 }
 
 export async function persistKnownMatches(searchKey, searchHash, items) {
@@ -298,6 +396,7 @@ export async function clearAllHistory() {
   await db.query("TRUNCATE TABLE scrape_run_results");
   await db.query("TRUNCATE TABLE scrape_runs");
   await db.query("TRUNCATE TABLE scrape_known_matches");
+  await db.query("TRUNCATE TABLE scrape_search_progress");
 }
 
 function parseJsonArray(value) {
