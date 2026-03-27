@@ -273,11 +273,7 @@ async function enrichItemsWithDetailContent(context, items, config, warnings) {
 
       try {
         await detailPage.goto(item.url, { waitUntil: "domcontentloaded" });
-        const content = await detailPage
-          .locator(detailSelector)
-          .first()
-          .innerText({ timeout: 10000 })
-          .catch(async () => detailPage.locator("body").innerText({ timeout: 5000 }));
+        const content = await extractDetailContent(detailPage, detailSelector);
 
         enriched.push({ ...item, content: normalizeContent(content) });
       } catch (error) {
@@ -290,6 +286,105 @@ async function enrichItemsWithDetailContent(context, items, config, warnings) {
   } finally {
     await detailPage.close();
   }
+}
+
+async function extractDetailContent(page, detailSelector) {
+  const locator = page.locator(detailSelector).first();
+  const fallbackLocator = page.locator("body").first();
+
+  const text = await locator
+    .evaluate(extractCleanTextFromRoot)
+    .catch(async () => fallbackLocator.evaluate(extractCleanTextFromRoot));
+
+  return String(text || "");
+}
+
+function extractCleanTextFromRoot(root) {
+  const target = root?.cloneNode?.(true);
+
+  if (!target) {
+    return "";
+  }
+
+  const removeSelectors = [
+    "header",
+    "nav",
+    "footer",
+    "aside",
+    "form",
+    "script",
+    "style",
+    "noscript",
+    "iframe",
+    "[role='navigation']",
+    ".breadcrumbs",
+    ".breadcrumb",
+    ".menu",
+    ".navbar",
+    ".nav",
+    ".footer",
+    ".header",
+    ".comments",
+    ".comment",
+    ".related",
+    ".related-posts",
+    ".post-related",
+    ".share",
+    ".social",
+    ".newsletter",
+    ".subscribe",
+    ".cookie",
+    ".modal",
+    ".popup",
+    ".banner",
+    ".sidebar",
+  ];
+
+  for (const selector of removeSelectors) {
+    target.querySelectorAll(selector).forEach((node) => node.remove());
+  }
+
+  const noisyPatterns = [
+    "articulos populares",
+    "artículos populares",
+    "articulos recientes",
+    "artículos recientes",
+    "categorias",
+    "categorías",
+    "comentarios",
+    "comparte este post",
+    "te gusto",
+    "te gustó",
+    "ingresar",
+    "suscribete",
+    "suscríbete",
+    "siguenos en redes",
+    "síguenos en redes",
+    "terminos y condiciones",
+    "términos y condiciones",
+    "politica de privacidad",
+    "política de privacidad",
+    "todos los derechos reservados",`r`n    "the store will not work correctly when cookies are disabled",`r`n    "necesitamos el consentimiento para utilizar tus cookies",
+  ];
+
+  target.querySelectorAll("*").forEach((node) => {
+    const text = String(node.textContent || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!text) {
+      return;
+    }
+
+    if (noisyPatterns.some((pattern) => text.includes(pattern))) {
+      node.remove();
+    }
+  });
+
+  return String(target.textContent || "").replace(/\s+/g, " ").trim();
 }
 
 async function getNextPageUrl(page, config, currentUrl) {
