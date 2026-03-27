@@ -36,7 +36,9 @@ export async function runScraper(config) {
   let currentUrl = progressState.resumeFromUrl || config.startUrl;
   let lastVisitedUrl = "";
   let pagesVisited = 0;
+  let failedPagesSkipped = 0;
   const maxPages = config.crawl?.maxPages ?? 1;
+  const maxFailedPageSkips = Math.max(3, Math.min(maxPages, 10));
   const startedFromSavedProgress = progressState.hasStoredProgress && currentUrl !== config.startUrl;
 
   try {
@@ -45,8 +47,18 @@ export async function runScraper(config) {
 
       try {
         await openListingPage(page, currentUrl, config);
+        failedPagesSkipped = 0;
       } catch (error) {
+        const fallbackUrl = buildFallbackNextPageUrl(currentUrl);
         warnings.push(`No se pudo cargar la pagina ${currentUrl}: ${toMessage(error)}`);
+
+        if (fallbackUrl && fallbackUrl !== currentUrl && failedPagesSkipped < maxFailedPageSkips) {
+          failedPagesSkipped += 1;
+          warnings.push(`Se omitio la pagina fallida y se intentara continuar con ${fallbackUrl}.`);
+          currentUrl = fallbackUrl;
+          continue;
+        }
+
         break;
       }
 
@@ -296,6 +308,22 @@ async function getNextPageUrl(page, config, currentUrl) {
   }
 
   return new URL(href, currentUrl).toString();
+}
+
+function buildFallbackNextPageUrl(currentUrl) {
+  try {
+    const url = new URL(currentUrl);
+    const currentPage = Number(url.searchParams.get("p") || "1");
+
+    if (!Number.isFinite(currentPage) || currentPage < 1) {
+      return null;
+    }
+
+    url.searchParams.set("p", String(currentPage + 1));
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 function normalizeRecordUrls(item, fields, baseUrl) {
