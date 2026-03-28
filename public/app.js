@@ -1,11 +1,18 @@
 const form = document.getElementById("scrape-form");
 const status = document.getElementById("status");
 const submitButton = document.getElementById("submit-button");
+const discoverButton = document.getElementById("discover-button");
+const analyzeButton = document.getElementById("analyze-button");
+const discoveryPanel = document.getElementById("discovery-panel");
+const discoveryCount = document.getElementById("discovery-count");
+const discoveryPreview = document.getElementById("discovery-preview");
 const summary = document.getElementById("summary");
 const resultsList = document.getElementById("results-list");
 const downloads = document.getElementById("downloads");
 const historyList = document.getElementById("history-list");
 const clearHistoryButton = document.getElementById("clear-history-button");
+
+let discoveredItems = [];
 
 await hydrateDefaults();
 await loadHistory();
@@ -13,30 +20,17 @@ await loadHistory();
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
 
-  const formData = new FormData(form);
-  const payload = {
-    url: formData.get("url")?.toString().trim(),
-    keyword: formData.get("keyword")?.toString().trim(),
-    maxPages: Number(formData.get("maxPages") || 10),
-    itemSelector: formData.get("itemSelector")?.toString().trim(),
-    titleSelector: formData.get("titleSelector")?.toString().trim(),
-    summarySelector: formData.get("summarySelector")?.toString().trim(),
-    urlSelector: formData.get("urlSelector")?.toString().trim(),
-    nextButtonSelector: formData.get("nextButtonSelector")?.toString().trim(),
-    skipKnownMatches: document.getElementById("skipKnownMatches").checked,
-    resetKnownMatches: document.getElementById("resetKnownMatches").checked,
-  };
+  const payload = buildFormPayload();
 
   setLoading(true);
   setStatus("Ejecutando scraping y revisando el contenido de los artículos...");
   clearResults();
+  hideDiscoveryPanel();
 
   try {
     const response = await fetch("/api/scrape", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
 
@@ -57,6 +51,80 @@ form.addEventListener("submit", async (event) => {
     setStatus(error.message || "Se produjo un error ejecutando el scraping.");
   } finally {
     setLoading(false);
+  }
+});
+
+discoverButton.addEventListener("click", async () => {
+  const payload = buildFormPayload();
+
+  setDiscovering(true);
+  setStatus("Descubriendo artículos en el listado (sin entrar a cada uno)...");
+  clearResults();
+  hideDiscoveryPanel();
+
+  try {
+    const response = await fetch("/api/discover", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo completar el descubrimiento.");
+    }
+
+    discoveredItems = Array.isArray(data.items) ? data.items : [];
+    const maxPagesConfigured = Number(document.getElementById("maxPages")?.value || 10);
+    renderDiscoveryPanel(data, maxPagesConfigured);
+    const reachedEnd = data.stats?.reachedEnd ? " (fin del listado alcanzado)" : ` de ${maxPagesConfigured} configuradas`;
+    setStatus(`Descubrimiento completado. Se encontraron ${discoveredItems.length} artículo(s) en ${data.stats?.pagesVisited ?? 0} página(s)${reachedEnd}.`);
+  } catch (error) {
+    setStatus(error.message || "Se produjo un error en el descubrimiento.");
+  } finally {
+    setDiscovering(false);
+  }
+});
+
+analyzeButton.addEventListener("click", async () => {
+  if (!discoveredItems.length) {
+    setStatus("No hay artículos descubiertos para analizar.");
+    return;
+  }
+
+  const payload = { ...buildFormPayload(), items: discoveredItems };
+
+  setAnalyzing(true);
+  clearResults();
+  const total = discoveredItems.length;
+  const estimatedMinutes = Math.ceil((total * 5) / 60);
+  setStatus(`Analizando ${total} artículo(s) uno a uno... Esto puede tardar ~${estimatedMinutes} minuto(s). No cierres la ventana.`);
+
+  try {
+    const response = await fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "No se pudo completar el análisis.");
+    }
+
+    const warningsCount = Array.isArray(data.warnings) ? data.warnings.length : 0;
+    setStatus(warningsCount ? `Análisis completado con ${warningsCount} advertencia(s).` : "Análisis completado.");
+    renderAnalysisSummary(data);
+    renderDownloads(data.files);
+    renderResults(data.items);
+    document.getElementById("resetKnownMatches").checked = false;
+    await loadHistory();
+  } catch (error) {
+    setStatus(error.message || "Se produjo un error en el análisis.");
+  } finally {
+    setAnalyzing(false);
   }
 });
 
@@ -233,9 +301,78 @@ function applyRunToForm(run) {
   setStatus("Se cargaron los filtros de una búsqueda anterior. Si ejecutas de nuevo, la búsqueda continuará desde la siguiente página pendiente de esa combinación URL + palabra clave.");
 }
 
+function buildFormPayload() {
+  const formData = new FormData(form);
+  return {
+    url: formData.get("url")?.toString().trim(),
+    keyword: formData.get("keyword")?.toString().trim(),
+    maxPages: Number(formData.get("maxPages") || 10),
+    itemSelector: formData.get("itemSelector")?.toString().trim(),
+    titleSelector: formData.get("titleSelector")?.toString().trim(),
+    summarySelector: formData.get("summarySelector")?.toString().trim(),
+    urlSelector: formData.get("urlSelector")?.toString().trim(),
+    nextButtonSelector: formData.get("nextButtonSelector")?.toString().trim(),
+    skipKnownMatches: document.getElementById("skipKnownMatches").checked,
+    resetKnownMatches: document.getElementById("resetKnownMatches").checked,
+  };
+}
+
 function setLoading(isLoading) {
   submitButton.disabled = isLoading;
+  discoverButton.disabled = isLoading;
   submitButton.textContent = isLoading ? "Buscando..." : "Ejecutar scraping";
+}
+
+function setDiscovering(isDiscovering) {
+  discoverButton.disabled = isDiscovering;
+  submitButton.disabled = isDiscovering;
+  discoverButton.textContent = isDiscovering ? "Descubriendo..." : "Descubrir artículos";
+}
+
+function setAnalyzing(isAnalyzing) {
+  analyzeButton.disabled = isAnalyzing;
+  analyzeButton.textContent = isAnalyzing ? "Analizando..." : "Analizar artículos";
+}
+
+function renderDiscoveryPanel(data, maxPagesConfigured = 10) {
+  const total = Array.isArray(data.items) ? data.items.length : 0;
+  const pages = data.stats?.pagesVisited ?? 0;
+  const reachedEnd = data.stats?.reachedEnd;
+  const coverageNote = reachedEnd
+    ? `Se recorrió el listado completo (${pages} páginas).`
+    : `Se revisaron ${pages} de ${maxPagesConfigured} páginas configuradas. Puede haber más artículos en páginas siguientes.`;
+  discoveryCount.innerHTML = `Se encontraron <strong>${total}</strong> artículo(s). ${coverageNote}<br>Haz clic en "Analizar artículos" para buscar la palabra clave en su contenido.`;
+
+  const preview = (data.items || []).slice(0, 5);
+  discoveryPreview.innerHTML = preview
+    .map((item) => {
+      const title = escapeHtml(item.title || "Sin título");
+      const url = item.url ? escapeHtml(item.url) : "";
+      return `<li>${url ? `<a href="${url}" target="_blank" rel="noreferrer">${title}</a>` : title}</li>`;
+    })
+    .join("");
+
+  if (total > 5) {
+    discoveryPreview.innerHTML += `<li><em>... y ${total - 5} más</em></li>`;
+  }
+
+  discoveryPanel.hidden = false;
+}
+
+function hideDiscoveryPanel() {
+  discoveryPanel.hidden = true;
+  discoveryPreview.innerHTML = "";
+  discoveryCount.textContent = "";
+  discoveredItems = [];
+}
+
+function renderAnalysisSummary(data) {
+  const warningsText = Array.isArray(data.warnings) && data.warnings.length
+    ? `<br><small>${escapeHtml(data.warnings[0])}${data.warnings.length > 1 ? ` y ${data.warnings.length - 1} más.` : ""}</small>`
+    : "";
+  summary.innerHTML = `
+    <strong>${data.stats?.uniqueItems ?? 0}</strong> coincidencia(s) encontradas de ${data.stats?.analyzedItems ?? 0} artículo(s) analizados.${warningsText}
+  `;
 }
 
 function setStatus(message) {

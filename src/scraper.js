@@ -127,6 +127,142 @@ export async function runScraper(config) {
   return result;
 }
 
+export async function discoverItems(config) {
+  validateConfig(config);
+
+  const browser = await chromium.launch({
+    headless: config.browser?.headless ?? true,
+  });
+
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+  });
+
+  const page = await context.newPage();
+  const timeoutMs = config.browser?.timeoutMs ?? 30000;
+  const warnings = [];
+  const searchKey = createSearchKey(config.startUrl, config.keywords ?? []);
+  const progressState = await loadSearchProgress(searchKey, config.startUrl, config.state);
+
+  page.setDefaultTimeout(timeoutMs);
+
+  const allItems = [];
+  let currentUrl = config.startUrl;
+  let lastVisitedUrl = "";
+  let pagesVisited = 0;
+  let failedPagesSkipped = 0;
+  const maxPages = config.crawl?.maxPages ?? 1;
+  const maxFailedPageSkips = Math.max(3, Math.min(maxPages, 10));
+
+  try {
+    while (currentUrl && pagesVisited < maxPages) {
+      lastVisitedUrl = currentUrl;
+
+      try {
+        await openListingPage(page, currentUrl, config);
+        failedPagesSkipped = 0;
+      } catch (error) {
+        const fallbackUrl = buildFallbackNextPageUrl(currentUrl);
+        warnings.push(`No se pudo cargar la pagina ${currentUrl}: ${toMessage(error)}`);
+
+        if (fallbackUrl && fallbackUrl !== currentUrl && failedPagesSkipped < maxFailedPageSkips) {
+          failedPagesSkipped += 1;
+          warnings.push(`Se omitio la pagina fallida y se intentara continuar con ${fallbackUrl}.`);
+          currentUrl = fallbackUrl;
+          continue;
+        }
+
+        break;
+      }
+
+      const pageItems = await extractItems(page, config);
+      allItems.push(...pageItems);
+      pagesVisited += 1;
+      currentUrl = await getNextPageUrl(page, config, currentUrl);
+    }
+  } finally {
+    await browser.close();
+  }
+
+  const uniqueItems = dedupe(allItems);
+
+  await persistSearchProgress(searchKey, progressState.searchHash, {
+    startUrl: config.startUrl,
+    nextPageUrl: currentUrl,
+    lastPageUrl: lastVisitedUrl,
+    isComplete: !currentUrl,
+  });
+
+  return {
+    items: uniqueItems,
+    warnings,
+    stats: {
+      pagesVisited,
+      totalFound: uniqueItems.length,
+      hasPendingPages: Boolean(currentUrl),
+      reachedEnd: !currentUrl && pagesVisited > 0,
+      lastVisitedUrl,
+    },
+  };
+}
+
+export async function analyzeItems(items, config) {
+  validateConfig(config);
+
+  const browser = await chromium.launch({
+    headless: config.browser?.headless ?? true,
+  });
+
+  const context = await browser.newContext({
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+  });
+
+  const warnings = [];
+  const searchKey = createSearchKey(config.startUrl, config.keywords ?? []);
+  const processedState = await loadKnownMatches(searchKey, config.state);
+
+  try {
+    const enriched = await enrichItemsWithDetailContent(context, items, config, warnings);
+    const filteredItems = filterByKeywords(enriched, config.keywords ?? []);
+    const uniqueItems = dedupe(filteredItems);
+    const files = await writeOutput(uniqueItems, config.output);
+
+    const result = {
+      items: uniqueItems,
+      files,
+      warnings,
+      stats: {
+        analyzedItems: items.length,
+        filteredItems: filteredItems.length,
+        uniqueItems: uniqueItems.length,
+      },
+    };
+
+    await persistKnownMatches(searchKey, processedState.searchHash, uniqueItems);
+    await persistRun(searchKey, processedState.searchHash, config, {
+      ...result,
+      stats: {
+        ...result.stats,
+        pagesVisited: 0,
+        extractedItems: items.length,
+        skippedKnownUrls: 0,
+        startedFromSavedProgress: false,
+        resumedFromUrl: "",
+        nextPageUrl: "",
+        hasPendingPages: false,
+        reachedEnd: true,
+        lastVisitedUrl: "",
+      },
+    });
+
+    return result;
+  } finally {
+    await browser.close();
+  }
+}
+
 export async function loadJsonConfig(configPath, fallbackPath) {
   try {
     const raw = await fs.readFile(configPath, "utf8");
@@ -306,7 +442,7 @@ async function extractItems(page, config) {
 async function enrichItemsWithDetailContent(context, items, config, warnings) {
   const detailSelector = config.extract?.detailContent?.selector || "main";
   const delayMs = config.extract?.detailContent?.delayMs ?? 500;
-  const detailTimeoutMs = config.extract?.detailContent?.timeoutMs ?? 15000;
+  const detailTimeoutMs = config.extract?.detailContent?.timeoutMs ?? 30000;
   const concurrency = config.extract?.detailContent?.concurrency ?? 1;
 
   const pages = [];
@@ -440,6 +576,14 @@ function extractCleanTextFromRoot(root) {
   ];
 
   target.querySelectorAll("*").forEach((node) => {
+    // Only remove leaf-level elements (no child elements) to avoid
+    // accidentally deleting parent containers that wrap article content
+    // alongside sidebar noise (e.g. a <div> whose textContent includes
+    // both the article body AND "categorias" from a nested sidebar).
+    if (node.childElementCount > 0) {
+      return;
+    }
+
     const text = String(node.textContent || "")
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")

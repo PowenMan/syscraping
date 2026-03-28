@@ -48,7 +48,7 @@
 
             <label>
               <span>Páginas a revisar</span>
-              <input id="maxPages" name="maxPages" type="number" min="1" max="29" value="10" required />
+              <input id="maxPages" name="maxPages" type="number" min="1" value="10" required />
             </label>
 
             <label>
@@ -88,10 +88,21 @@
               </label>
             </div>
 
-            <button id="submit-button" type="submit">Ejecutar scraping</button>
+            <div class="button-group">
+              <button id="submit-button" type="submit">Ejecutar scraping</button>
+              <button id="discover-button" type="button" class="secondary-button">Descubrir artículos</button>
+            </div>
           </form>
 
           <div id="status" class="status" aria-live="polite"></div>
+
+          <div id="discovery-panel" class="discovery-panel" hidden>
+            <div class="discovery-summary">
+              <span id="discovery-count"></span>
+            </div>
+            <ul id="discovery-preview" class="discovery-preview"></ul>
+            <button id="analyze-button" type="button">Analizar artículos</button>
+          </div>
         </section>
 
         <aside class="card history-panel">

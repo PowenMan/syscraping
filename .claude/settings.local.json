@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(node --test tests/)",
-      "Bash(node --test ./tests/scraper.test.js)"
+      "Bash(node --test ./tests/scraper.test.js)",
+      "WebFetch(domain:clubmamasypapas.com)",
+      "Bash(npm test:*)"
     ]
   }
 }

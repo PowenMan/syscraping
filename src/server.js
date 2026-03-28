@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import "../env.js";
 import { clearAllHistory, deleteRun, ensureDatabaseSchema, getRecentRuns, getRunResults } from "./db.js";
 import { logger } from "./logger.js";
-import { loadJsonConfig, resolveOutputUrls, runScraper } from "./scraper.js";
+import { analyzeItems, discoverItems, loadJsonConfig, resolveOutputUrls, runScraper } from "./scraper.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,6 +99,30 @@ const server = http.createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "POST" && request.url === "/api/discover") {
+      const body = await readJsonBody(request);
+      const config = await buildConfig(body, { detailEnabled: false });
+      const result = await discoverItems(config);
+      return sendJson(response, 200, {
+        items: result.items,
+        stats: result.stats,
+        warnings: result.warnings,
+      });
+    }
+
+    if (request.method === "POST" && request.url === "/api/analyze") {
+      const body = await readJsonBody(request);
+      const items = Array.isArray(body?.items) ? body.items : [];
+      const config = await buildConfig(body, { detailEnabled: true });
+      const result = await analyzeItems(items, config);
+      return sendJson(response, 200, {
+        items: result.items,
+        stats: result.stats,
+        warnings: result.warnings,
+        files: resolveOutputUrls(result.files),
+      });
+    }
+
     return sendJson(response, 404, { error: "Ruta no encontrada." });
   } catch (error) {
     return sendJson(response, 500, {
@@ -113,7 +137,7 @@ server.listen(port, () => {
   logger.info(`Syscraping disponible en http://localhost:${port}`);
 });
 
-async function buildConfig(body) {
+async function buildConfig(body, { detailEnabled = true } = {}) {
   const baseConfig = await loadJsonConfig(fallbackConfigPath);
   const url = String(body?.url || DEFAULTS.startUrl).trim();
   const keyword = String(body?.keyword || DEFAULTS.keyword).trim();
@@ -164,7 +188,7 @@ async function buildConfig(body) {
         }
       },
       detailContent: {
-        enabled: true,
+        enabled: detailEnabled,
         selector: ".page-main, main, body"
       }
     },
