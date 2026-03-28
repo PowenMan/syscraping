@@ -5,4 +5,4 @@ test-results/
 scraper.config.json
 .env
 storage/
-.claude/
+/.claude
